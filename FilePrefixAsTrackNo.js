@@ -124,10 +124,10 @@ for( var int_idxOfTracks = 1 ; int_idxOfTracks <= iittrackcol_tracks.Count; int_
         int_trackNo_tmp = parseInt(marr_matches_tmp[2], 10);
     }
 
-    objTrack.DiscNumber  = int_discNo_tmp; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_18</SDKREF>
-    objTrack.DiscCount  = intarr_maxes.length; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_16</SDKREF>
-    objTrack.TrackNumber = int_trackNo_tmp; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_47</SDKREF>
-    objTrack.TrackCount  = intarr_maxes[(int_discNo_tmp - 1)]; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_45</SDKREF>
+    objTrack.DiscNumber  = int_discNo_tmp; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_19</SDKREF>
+    objTrack.DiscCount  = intarr_maxes.length; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_17</SDKREF>
+    objTrack.TrackNumber = int_trackNo_tmp; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_48</SDKREF>
+    objTrack.TrackCount  = intarr_maxes[(int_discNo_tmp - 1)]; // <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_46</SDKREF>
 }
 
 WScript.Echo("Done!");
