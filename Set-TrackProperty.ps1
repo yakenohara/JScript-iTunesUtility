@@ -49,7 +49,8 @@ function ConvertTo-FileInfo_m{
     トラックのファイルパス
 
     .OUTPUTS
-    [System.IO.FileInfo] トラックのファイル
+    System.IO.FileInfo
+    トラックのファイル
 #>
     [CmdletBinding()]
     Param(
@@ -76,7 +77,8 @@ function ConvertTo-String{
     文字列
 
     .OUTPUTS
-    [System.IO.FileInfo] or $null 文字列。引数 `CharcterString` が指定されない場合は、 $null
+    System.IO.FileInfo or $null
+    文字列。引数 `CharcterString` が指定されない場合は、 $null
 #>
     [CmdletBinding()]
     Param(
@@ -100,7 +102,8 @@ function ConvertTo-1to999{
     トラック No
     
     .OUTPUTS
-    [System.UInt64] トラック No
+    System.UInt64
+    トラック No
 #>
     [CmdletBinding()]
     Param(
@@ -139,7 +142,8 @@ function ConvertTo-TrackNo{
     トラック No
     
     .OUTPUTS
-    [System.UInt64] トラック No
+    System.UInt64
+    トラック No
 #>
     [CmdletBinding()]
     Param(
@@ -168,7 +172,7 @@ function ConvertTo-TrackNo{
 
 $obj_converterUtil = [PSCustomObject]@{
     FilePath = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-FileInfo($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-FileInfo_m($arg) }
     Name = `
         [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     Artist = `
@@ -222,13 +226,15 @@ if($PropertySpecifierFile -is [System.String]){ # 文字列の場合
 function Private:Set-IITTrackProperty{
 <#
     .SYNOPSIS
-    指定された名称がプレイリスト名として存在しないことを確認する
+    トラックのプロパティを設定する
 
     .PARAMETER Track
     プロパティ指定対象のトラック
+    iTunes の IITTrack オブジェクトを指定する (配列可。パイプライン可。)
+    <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html</SDKREF>
 
     .PARAMETER Name
-    トラック名を設定する
+    トラック名を設定する (パイプライン入力可)
     使用する Property or Method : `HRESULT IITObject::Name  (  [in] BSTR  name   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITObject.html#z49_1</SDKREF>
     .PARAMETER Artist
@@ -284,16 +290,61 @@ function Private:Set-IITTrackProperty{
     使用する Property or Method : `HRESULT IITFileOrCDTrack::SortArtist  (  [in] BSTR  artist   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITFileOrCDTrack.html#z81_43</SDKREF>
 
+    .INPUTS
+    System.__ComObject
+    System.__ComObject[]
+    プロパティ指定対象のトラック
+    iTunes の IITTrack オブジェクトを指定する
+    <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html</SDKREF>
+
+
     .OUTPUTS
-    [System.Boolean] 指定された名称がプレイリスト名として存在しない場合: $true, 存在する場合: $false
+    System.__ComObject
+    System.__ComObject[]
+    処理結果のトラック
+    iTunes の IITTrack オブジェクト。
+    <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html</SDKREF>
 #>
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true)][System.__ComObject]$Track,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)][System.__ComObject[]]$Track,
         [System.String]$Name
     )
-    $Track.Name = $Name
 
+    begin {
+        $IITTrack_modified = [System.Collections.Generic.List[System.__ComObject]]::new()
+    }
+
+    process {
+        foreach ($IITTrack_target in $Track){
+
+            # パラメーターループ 
+            #Note
+            # 以下のパラメーターは `$PSBoundParameters` に含まれない
+            #  - 未指定のパラメーター (デフォルト値が設定されている場合を含む)
+            foreach ($str_key in $PSBoundParameters.Keys){
+                
+                # write-host ("Name: " + $str_key + ", Val:" + ($PSBoundParameters[$str_key]).ToString())
+
+                # 処理対象のトラックオブジェクトはスキップ
+                if ($str_key -eq "Track") {
+                    continue
+                }
+
+                # プロパティの設定
+                #Note
+                # 空文字は無視される (経験則。iTunesCOM.chm には明記されていない)
+                $IITTrack_target.$str_key = $PSBoundParameters[$str_key]
+
+            }
+            
+            $IITTrack_modified.Add($IITTrack_target)
+        }
+    }
+
+    end {
+        Write-Output $IITTrack_modified
+    }
 }
 
 #Note
@@ -311,7 +362,8 @@ function Private:Test-IsInvalidPlayListName{
     "iTunes.Application" の COM オブジェクト
 
     .OUTPUTS
-    [System.Boolean] 指定された名称がプレイリスト名として存在しない場合: $true, 存在する場合: $false
+    System.Boolean
+    指定された名称がプレイリスト名として存在しない場合: $true, 存在する場合: $false
 #>
     [CmdletBinding()]
     Param(
@@ -410,10 +462,6 @@ for ($j = 0 ; $j -lt $objarr_rows.Count ; $j++){ # 行毎ループ
 }
 # -----------------------------------------------------------------------------<Property の型チェック>
 
-# 作業用一時プレイリストの作成
-$str_playListName = "0_temporary"
-$IITPlaylist_playList = $comobj_iTunes.CreatePlaylist($str_playListName)   # プレイリストの作成
-                                                                           # <SDKREF>iTunesCOM.chm::/interfaceIiTunes.html#z5_2</SDKREF>
 
 # トラック毎プロパティ設定
 for ($int_idxOfRow = 0 ; $int_idxOfRow -lt $hasharr_splatter.Count ; $int_idxOfRow++){
@@ -430,7 +478,7 @@ for ($int_idxOfRow = 0 ; $int_idxOfRow -lt $hasharr_splatter.Count ; $int_idxOfR
     $hasharr_splatter[$int_idxOfRow].Track = $IITTrack_track_added # `Set-IITTrackProperty` をコールする際にのスプラッターに追加
 
     $hash_splatter = $hasharr_splatter[$int_idxOfRow]
-    Set-IITTrackProperty @hash_splatter # トラックのプロパティを設定
+    Set-IITTrackProperty @hash_splatter | Out-Null # トラックのプロパティを設定
 
 }
 
