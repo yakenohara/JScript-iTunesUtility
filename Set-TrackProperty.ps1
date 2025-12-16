@@ -2,23 +2,54 @@
 # このファイルは UTF-8 (BOM 付き) で保存すること。(ターミナルに日本語メッセージを表示するため)
 # </CAUTION!>
 
-#
-# NOTE
-#  - .csv ファイル内のエンコーディングが BOM 付き UTF-8 となっているかどうかの確認はしない (実装が大変な為)  
-#  - .csv ファイルの書式
-#
-
 <#
     .SYNOPSIS
-    
+    トラックに対するプロパティ情報を定義した .csv ファイルを読み込んで iTunes のトラックに反映する
     
     .PARAMETER PropertySpecifierFile
-    
-
-    
-
+    Property 指定 CSV ファイル
+    ファイルパスを表す [System.String] またはファイルを表す [System.IO.FileInfo] を指定
+    Note
+     # エンコーディング
+       - 文字列エンコーディングは BOM 付き UTF-8 であること  
+     # 書式
+         - 1行目はプロパティ指定のためのタイトルとして定義  
+         - 2行目以降にトラック毎のプロパティに指定する情報を記載  
+        ## 必須となる列
+         - FilePath  
+           トラックのファイルパス
+        ## オプションとなる列
+         - Name  
+           トラック名  
+         - Artist  
+           アーティスト名  
+         - Album  
+           アルバム名  
+         - AlbumArtist  
+           アルバムアーティスト名  
+         - Year  
+           年  
+         - Compilation  
+           コンピレーションかどうか TODO書式
+         - DiscNumber  
+           ディスク番号 (1Base)  
+         - DiscCount  
+           ディスク番号(全体) (1Base)  
+         - TrackNumber  
+           トラック番号 (1Base)  
+         - TrackCount  
+           トラック番号(全体) (1Base)  
+         - AddArtworkFromFile  
+           ファイルからアルバムアートワークを追加する  
+           空文字の場合は無視  
+           Note: すでにアートワークが設定済みでも、新たに追加する  
+         - SortAlbum  
+           アルバム名の '読み'  
+         - SortAlbumArtist  
+           アルバムアーティスト名の '読み'  
+         - SortArtist  
+           アーティスト名の '読み'  
 #>
-
 [CmdletBinding()]
 Param(    
     [Parameter(Mandatory=$true)][ValidateScript({
@@ -36,137 +67,98 @@ Param(
 # Private 関数としては定義しない
 #     理由: `Add-Member` した時の `-Name` の名称で関数コールした場合、以下エラーが発生する為
 #          「"用語 '～～～' は、コマンドレット、関数、スクリプト ファイル、または操作可能なプログラムの名前として認識されません。」
+
+# 
+# Property 指定 CSV ファイル内における FileInfo 系変換 (必須パラメーター用)
 function ConvertTo-FileInfo_m{
-<#
-    .SYNOPSIS
-    Track の Property 指定 CSV ファイル内におけるファイルパス指定用チェック & 型変換 (必須指定)
-
-    .DESCRIPTION
-    以下の場合は例外 [System.Exception] を throw する
-     - 引数 `FilePath` がファイルを表さない
-    
-    .PARAMETER FilePath
-    トラックのファイルパス
-
-    .OUTPUTS
-    System.IO.FileInfo
-    トラックのファイル
-#>
     [CmdletBinding()]
     Param(
         [Parameter(Mandatory=$true)][System.String]$FilePath
     )
-    
+    #todo トラックが iTunes に追加不能なフォーマットの場合 e.g. .flac
     if (-Not (Test-Path -LiteralPath $FilePath -PathType Leaf)){ # パスが存在しない場合
         throw [System.Exception]::new(
             "FilePath: `"" + $FilePath + "`"`n" +
             "No such file."
         )
     }
-
-    # FileInfo を取得して返す
-    return (Get-Item -LiteralPath $FilePath)
+    return (Get-Item -LiteralPath $FilePath) # FileInfo を取得して返す
 }
 
-function ConvertTo-String{
-<#
-    .SYNOPSIS
-    Track の Property 指定 CSV ファイル内における文字列指定用チェック (必須指定)
-    
-    .PARAMETER CharcterString
-    文字列
+# 
+# Property 指定 CSV ファイル内における FileInfo 系変換 (Artwork 用)
+function ConvertTo-ArtworkSpecifier{
+    [CmdletBinding()]
+    Param(
+        [System.String]$FilePath
+    )
+    $strarr_allowed_ext = @(
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.bmp'
+    )
+    if ($FilePath -eq ""){
+        $out_fileinfo = $null
+    }else{
+        if (-Not (Test-Path -LiteralPath $FilePath -PathType Leaf)){ # パスが存在しない場合
+            throw [System.Exception]::new(
+                "FilePath: `"" + $FilePath + "`"`n" +
+                "No such file."
+            )
+        }
 
-    .OUTPUTS
-    System.IO.FileInfo or $null
-    文字列。引数 `CharcterString` が指定されない場合は、 $null
-#>
+        $str_ext = [System.IO.Path]::GetExtension($FilePath).ToLowerInvariant()
+        if (-Not ($str_ext -in $strarr_allowed_ext)){
+            throw [System.Exception]::new(
+                "FilePath: `"" + $FilePath + "`"`n" +
+                "File is not image. (Expected ext: " + ($strarr_allowed_ext -Join ", ") + ", but specified " + $str_ext + ")"
+            )
+        }
+        $out_fileinfo = (Get-Item -LiteralPath $FilePath) # FileInfo を取得
+    }
+    return $out_fileinfo
+}
+
+#
+# Property 指定 CSV ファイル内における文字列系変換
+function ConvertTo-String{
     [CmdletBinding()]
     Param(
         [System.String]$CharcterString
     )
-    
-    # FileInfo を取得して返す
     return $CharcterString
 }
 
-function ConvertTo-1to999{
-<#
-    .SYNOPSIS
-    Track の Property 指定 CSV ファイル内におけるトラック No 指定用チェック & 型変換
-
-    .DESCRIPTION
-    以下の場合は例外 [System.Exception] を throw する
-     - 引数 `TrackNo` が 1-999 範囲内の整数ではない
-    
-    .PARAMETER TrackNo
-    トラック No
-    
-    .OUTPUTS
-    System.UInt64
-    トラック No
-#>
+#
+# Property 指定 CSV ファイル内における boolean 系変換
+function ConvertTo-Bool{
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true)][System.String]$TrackNo
+        [System.String]$Bool_in
     )
-
     try{
-        $TrackNo_casted = [System.UInt64]::Parse($TrackNo)
-    }catch{ # キャストエラー (-> 1 以上の整数値でない)
-        throw [System.Exception]::new(
-            "Expected unsigned int, but specified `"" + $TrackNo + "`""
-        )
-    }
-    if(
-        ($TrackNo_casted -lt 1) -or
-        (999 -lt $TrackNo_casted)
-    ){
-        throw [System.Exception]::new(
-            "Expected Range 1 to 999, but specified " + $TrackNo
-        )
+        $Bool_out = [bool]::Parse($Bool_in)
+    }catch{
+        throw [System.Exception]::new("Expected boolean, but specified `"" + $Bool_in + "`".")
     }
 
-    return $TrackNo_casted
+    return $Bool_out
 }
 
-function ConvertTo-TrackNo{
-<#
-    .SYNOPSIS
-    Track の Property 指定 CSV ファイル内におけるトラック No 指定用チェック & 型変換
-
-    .DESCRIPTION
-    以下の場合は例外 [System.Exception] を throw する
-     - 引数 `TrackNo` が 1-999 範囲内の整数ではない
-    
-    .PARAMETER TrackNo
-    トラック No
-    
-    .OUTPUTS
-    System.UInt64
-    トラック No
-#>
+#
+# Property 指定 CSV ファイル内における整数値系変換
+function ConvertTo-UInt64{
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true)][System.String]$TrackNo
+        [Parameter(Mandatory=$true)][System.String]$Uint64_in
     )
-
     try{
-        $TrackNo_casted = [System.UInt64]::Parse($TrackNo)
-    }catch{ # キャストエラー (-> 1 以上の整数値でない)
-        throw [System.Exception]::new(
-            "Expected unsigned int, but specified `"" + $TrackNo + "`""
-        )
+        $Uint64_out = [System.UInt64]::Parse($Uint64_in)
+    }catch{
+        throw [System.Exception]::new("Expected unsigned int, but specified `"" + $Uint64_in + "`".")
     }
-    if(
-        ($TrackNo_casted -lt 1) -or
-        (999 -lt $TrackNo_casted)
-    ){
-        throw [System.Exception]::new(
-            "Expected Range 1 to 999, but specified " + $TrackNo
-        )
-    }
-
-    return $TrackNo_casted
+    return $Uint64_out
 }
 # --------------------</CSV ファイルから読み取った文字列の書式チェック & 型変換>
 
@@ -176,31 +168,31 @@ $obj_converterUtil = [PSCustomObject]@{
     Name = `
         [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     Artist = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     Album = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     AlbumArtist = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     Year = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-UInt64($arg) }
     Compilation = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-Bool($arg) }
     DiscNumber = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-UInt64($arg) }
     DiscCount = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-UInt64($arg) }
     TrackNumber = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-UInt64($arg) }
     TrackCount = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-UInt64($arg) }
     AddArtworkFromFile = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-ArtworkSpecifier($arg) }
     SortAlbum = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     SortAlbumArtist = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
     SortArtist = `
-        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-1to999($arg) }
+        [PSCustomObject]@{} | Add-Member -PassThru ScriptMethod -Name fnc_converter -Value { Param($arg) ConvertTo-String($arg) }
 }
 # <引数チェック>------------------------------------------------------------------------------------------
 
@@ -230,27 +222,32 @@ function Private:Set-IITTrackProperty{
 
     .PARAMETER Track
     プロパティ指定対象のトラック
-    iTunes の IITTrack オブジェクトを指定する (配列可。パイプライン可。)
-    <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html</SDKREF>
+    System.IO.FileInfo オブジェクトを指定する (配列可。パイプライン可。)
 
     .PARAMETER Name
-    トラック名を設定する (パイプライン入力可)
+    トラック名を設定する
+    空文字を指定した場合は無視 (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITObject::Name  (  [in] BSTR  name   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITObject.html#z49_1</SDKREF>
     .PARAMETER Artist
     アーティスト名を設定する
+    空文字を指定した場合は削除扱い (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITTrack::Artist  (  [in] BSTR  artist   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_5</SDKREF>
     .PARAMETER Album
     アルバム名を設定する
+    空文字を指定した場合は削除扱い (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITTrack::Album  (  [in] BSTR  album   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_3</SDKREF>
     .PARAMETER AlbumArtist
     アルバムアーティスト名を設定する
+    空文字を指定した場合は削除扱い (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITFileOrCDTrack::AlbumArtist  (  [in] BSTR  albumArtist   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITFileOrCDTrack.html#z81_25</SDKREF>
     .PARAMETER Year
     年を設定する
+    設定可能範囲は 1999 ～ 9999 または 0。範囲外を設定した場合は [System.Exception] 例外をを発生
+    0 を指定した場合は削除扱い (iTunes仕様)
     使用する Property or Method : `HRESULT IITTrack::Year  (  [in] long  year   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_52</SDKREF>
     .PARAMETER Compilation
@@ -259,64 +256,133 @@ function Private:Set-IITTrackProperty{
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_12</SDKREF>
     .PARAMETER DiscNumber
     ディスク番号を設定する (1Base)
+    設定可能範囲は 0 ～ 99。範囲外を設定した場合は [System.Exception] 例外をを発生
+    Note: 100 以上の数値は ID3 タグのフォーマット上非推奨？詳細不明。
+    0 を指定した場合は削除扱い (iTunes仕様)
     使用する Property or Method : `HRESULT IITTrack::DiscNumber  (  [in] long  discNumber   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_19</SDKREF>
     .PARAMETER DiscCount
     ディスク番号(全体)を設定する (1Base)
+    設定可能範囲は 0 ～ 99。範囲外を設定した場合は [System.Exception] 例外をを発生
+    Note: 100 以上の数値は ID3 タグのフォーマット上非推奨？詳細不明。
+    0 を指定した場合は削除扱い (iTunes仕様)
+    設定済みの DiscNumber より小さい値を指定した場合は無視 (iTunes仕様)
     使用する Property or Method : `HRESULT IITTrack::DiscCount  (  [in] long  discCount   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_17</SDKREF>
     .PARAMETER TrackNumber
     トラック番号を設定する (1Base)
+    設定可能範囲は 0 ～ 999。範囲外を設定した場合は [System.Exception] 例外をを発生
+    Note: 1000 以上の数値は ID3 タグのフォーマット上非推奨？詳細不明。
+    0 を指定した場合は削除扱い (iTunes仕様)
     使用する Property or Method : `HRESULT IITTrack::TrackNumber  (  [in] long  trackNumber   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_48</SDKREF>
     .PARAMETER TrackCount
     トラック番号(全体)を設定する (1Base)
+    設定可能範囲は 0 ～ 999。範囲外を設定した場合は [System.Exception] 例外をを発生
+    Note: 1000 以上の数値は ID3 タグのフォーマット上非推奨？詳細不明。
+    設定済みの TrackNumber より小さい値を指定した場合は無視 (iTunes仕様)
+    0 を指定した場合は削除扱い (iTunes仕様)
     使用する Property or Method : `HRESULT IITTrack::TrackCount  (  [in] long  trackCount   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z77_46</SDKREF>
     .PARAMETER AddArtworkFromFile
-    ファイルからアルバムアートワークを設定する
+    ファイルからアルバムアートワークを追加する
     使用する Property or Method : `HRESULT IITTrack::AddArtworkFromFile  (  [in] BSTR  filePath,    [out, retval] IITArtwork **  iArtwork  )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html#z75_2</SDKREF>
     .PARAMETER SortAlbum
     アルバム名の '読み' を設定する
+    空文字を指定した場合は削除扱い (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITFileOrCDTrack::SortAlbum  (  [in] BSTR  album   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITFileOrCDTrack.html#z81_39</SDKREF>
     .PARAMETER SortAlbumArtist
     アルバムアーティスト名の '読み' を設定する
+    空文字を指定した場合は削除扱い (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITFileOrCDTrack::SortAlbumArtist  (  [in] BSTR  albumArtist   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITFileOrCDTrack.html#z81_41</SDKREF>
     .PARAMETER SortArtist
     アーティスト名の '読み' を設定する
+    空文字を指定した場合は削除扱い (iTUnes 仕様)
     使用する Property or Method : `HRESULT IITFileOrCDTrack::SortArtist  (  [in] BSTR  artist   )`
                                  <SDKREF>iTunesCOM.chm::/interfaceIITFileOrCDTrack.html#z81_43</SDKREF>
 
-    .INPUTS
-    System.__ComObject
-    System.__ComObject[]
-    プロパティ指定対象のトラック
-    iTunes の IITTrack オブジェクトを指定する
-    <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html</SDKREF>
+    .PARAMETER ValidateOnly
+    トラックのプロパティを設定は行わず、引数および入力オブジェクトの検証のみを行う
 
+    .INPUTS
+    System.IO.FileInfo
+    System.IO.FileInfo[]
+    プロパティ指定対象のトラック
 
     .OUTPUTS
-    System.__ComObject
-    System.__ComObject[]
-    処理結果のトラック
-    iTunes の IITTrack オブジェクト。
-    <SDKREF>iTunesCOM.chm::/interfaceIITTrack.html</SDKREF>
+    System.IO.FileInfo
+    System.IO.FileInfo[]
 #>
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)][System.__ComObject[]]$Track,
-        [System.String]$Name
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)][System.IO.FileInfo[]]$Track,
+        [System.String]$Name,
+        [System.String]$Artist,
+        [System.String]$Album,
+        [System.String]$AlbumArtist,
+        [System.UInt64]$Year,
+        [System.Boolean]$Compilation,
+        [System.UInt64]$DiscNumber,
+        [System.UInt64]$DiscCount,
+        [System.UInt64]$TrackNumber,
+        [System.UInt64]$TrackCount,
+        [System.IO.FileInfo]$AddArtworkFromFile,
+        [System.String]$SortAlbum,
+        [System.String]$SortAlbumArtist,
+        [System.String]$SortArtist,
+        [switch]$ValidateOnly
     )
 
     begin {
-        $IITTrack_modified = [System.Collections.Generic.List[System.__ComObject]]::new()
+
+        $strarr_methodNames = @(
+            "AddArtworkFromFile"
+        )
+
+        # iTunesObject 生成
+        $str_comobjName_iTunes = "iTunes.Application"
+        try{
+            $comobj_iTunes = New-Object -ComObject $str_comobjName_iTunes
+        }catch{
+            Write-Error (
+                "Cannot create COM Object `"" + $str_comobjName_iTunes + "`".`n" + 
+                $_.ToString()
+            )
+            Exit 1 # 終了
+        }
+
+        $blcok_freeiTunes = {
+            # iTunes に関する COM オブジェクトの解放
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($comobj_iTunes)
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+        }
+
+        # 返却値配列の定義
+        $FileInfoarr_track_modified = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
     }
 
     process {
-        foreach ($IITTrack_target in $Track){
+        foreach ($FileInfo_track in $Track){
+
+            # トラックの `IITTrack` オブジェクトを取得
+            $IITOperationStatus_status_trackAdding = $comobj_iTunes.LibraryPlaylist.AddFile($FileInfo_track.FullName) # トラックを追加
+            while ($IITOperationStatus_status_trackAdding.InProgress) { # 追加完了まで待機
+                Start-Sleep -Milliseconds 10
+            }
+            $IITTrack_track_added = $IITOperationStatus_status_trackAdding.Tracks.Item(1) # 追加したトラックの `IITTrack` オブジェクトを取得
+
+            $blcok_freeTrack = {
+                # 追加トラックに関する COM オブジェクトの解放
+                [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($IITTrack_track_added)
+                [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($IITOperationStatus_status_trackAdding.Tracks)
+                [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($IITOperationStatus_status_trackAdding)
+                [GC]::Collect()
+                [GC]::WaitForPendingFinalizers()
+            }
 
             # パラメーターループ 
             #Note
@@ -324,82 +390,70 @@ function Private:Set-IITTrackProperty{
             #  - 未指定のパラメーター (デフォルト値が設定されている場合を含む)
             foreach ($str_key in $PSBoundParameters.Keys){
                 
-                # write-host ("Name: " + $str_key + ", Val:" + ($PSBoundParameters[$str_key]).ToString())
-
                 # 処理対象のトラックオブジェクトはスキップ
                 if ($str_key -eq "Track") {
                     continue
                 }
 
-                # プロパティの設定
-                #Note
-                # 空文字は無視される (経験則。iTunesCOM.chm には明記されていない)
-                $IITTrack_target.$str_key = $PSBoundParameters[$str_key]
+                # <検証>------------------------------------------------------------------------------------------
+                if ($str_key -eq "Year") { # 年の範囲は 1900 ～ 9999 の範囲内または 0 でなければならない
+                    if (
+                        ($PSBoundParameters[$str_key] -ne 0) -And
+                        (
+                            ($PSBoundParameters[$str_key] -lt 1900) -or
+                            (9999 -lt $PSBoundParameters[$str_key])
+                        )
+                    ){
+                        & $blcok_freeTrack # 追加トラックに関する COM オブジェクトの解放
+                        & $blcok_freeiTunes # iTunes に関する COM オブジェクトの解放
+                        throw [System.Exception]::new("`"" + $str_key + "`" parameter should be in range 1900 to 9999 or 0, but specified " + $PSBoundParameters[$str_key].ToString() + ".")
+                    }
+                }
+                if (
+                    ($str_key -eq "DiscNumber") -or
+                    ($str_key -eq "DiscCount")
+                ){
+                    if(99 -lt $PSBoundParameters[$str_key]){
+                        & $blcok_freeTrack # 追加トラックに関する COM オブジェクトの解放
+                        & $blcok_freeiTunes # iTunes に関する COM オブジェクトの解放
+                        throw [System.Exception]::new("`"" + $str_key + "`" parameter should be in range 0 to 99, but specified " + $PSBoundParameters[$str_key].ToString() + ".")
+                    }
+                }
+                if (
+                    ($str_key -eq "TrackNumber") -or
+                    ($str_key -eq "TrackCount")
+                ){
+                    if(999 -lt $PSBoundParameters[$str_key]){
+                        & $blcok_freeTrack # 追加トラックに関する COM オブジェクトの解放
+                        & $blcok_freeiTunes # iTunes に関する COM オブジェクトの解放
+                        throw [System.Exception]::new("`"" + $str_key + "`" parameter should be in range 0 to 999, but specified " + $PSBoundParameters[$str_key].ToString() + ".")
+                    }
+                }
+                # -----------------------------------------------------------------------------------------</検証>
 
+                if($ValidateOnly){ # 検証のみ場合
+                    continue
+                }
+
+                # プロパティの設定
+                if($str_key -in $strarr_methodNames){ # メソッドで指定するタイプの場合
+                    $IITTrack_track_added.$str_key($PSBoundParameters[$str_key]) | Out-Null
+                }else{
+                    $IITTrack_track_added.$str_key = $PSBoundParameters[$str_key]
+                }
             }
-            
-            $IITTrack_modified.Add($IITTrack_target)
+
+            & $blcok_freeTrack # 追加トラックに関する COM オブジェクトの解放
+            $FileInfoarr_track_modified.Add($FileInfo_track) # 返却用 FileInfo 配列にトラックを追加
         }
     }
 
     end {
-        Write-Output $IITTrack_modified
+        Write-Output $FileInfoarr_track_modified
+
+        & $blcok_freeiTunes # iTunes に関する COM オブジェクトの解放
+
     }
-}
-
-#Note
-# 使っていない関数。
-# すでに存在するプレイリスト名を使って新しくプレイリストを作成しても、作成は成功するので、本関数は不要。
-function Private:Test-IsInvalidPlayListName{
-<#
-    .SYNOPSIS
-    指定された名称がプレイリスト名として存在しないことを確認する
-
-    .PARAMETER Suggestion
-    確認したい名称
-
-    .PARAMETER iTunesObj
-    "iTunes.Application" の COM オブジェクト
-
-    .OUTPUTS
-    System.Boolean
-    指定された名称がプレイリスト名として存在しない場合: $true, 存在する場合: $false
-#>
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory=$true)][System.String]$Suggestion,
-        [Parameter(Mandatory=$true)][System.__ComObject]$iTunesObj
-    )
-
-    $IITPlaylistCollection_playLists = $iTunesObj.LibrarySource.Playlists # プレイリストの取得
-                                                                            # <SDKREF>iTunesCOM.chm::/interfaceIITPlaylistCollection.html</SDKREF>
-
-    $bl_isInvalidPlayListName = $true
-
-    # プレイリスト毎ループ
-    for($int_idxOfPlayLists = 1 ; $int_idxOfPlayLists -le $IITPlaylistCollection_playLists.Count; $int_idxOfPlayLists++ ){
-        $IITPlaylist_playList = $IITPlaylistCollection_playLists.Item($int_idxOfPlayLists)  # プレイリストオブジェクトを取得
-                                                                                            # <SDKREF>iTunesCOM.chm::/interfaceIITPlaylist.html</SDKREF>
-
-        if ($IITPlaylist_playList.Name -eq $Suggestion){ # プレイリスト名が一致した場合
-            return $false 
-        }
-    }
-
-    # すべてのプレイリスト名と '一致しない' 事を確認したので true を返却
-    return $true
-}
-
-# iTunesObject生成
-$str_comobjName_iTunes = "iTunes.Application"
-try{
-    $comobj_iTunes = New-Object -ComObject $str_comobjName_iTunes
-}catch{
-    Write-Error (
-        "Cannot create COM Object `"" + $str_comobjName_iTunes + "`".`n" + 
-        $_.ToString()
-    )
-    Exit 1 # 終了
 }
 
 # <CSV ファイルの読込>--------------------------------------------------------------------------------
@@ -466,20 +520,22 @@ for ($j = 0 ; $j -lt $objarr_rows.Count ; $j++){ # 行毎ループ
 # トラック毎プロパティ設定
 for ($int_idxOfRow = 0 ; $int_idxOfRow -lt $hasharr_splatter.Count ; $int_idxOfRow++){
 
+    # ハッシュのキー名 `FilePath` -> `Track` 変換
     $finfo_trackFile = $hasharr_splatter[$int_idxOfRow].FilePath
-    $hasharr_splatter[$int_idxOfRow].Remove("FilePath") # `Set-IITTrackProperty` をコールする際には不要なので削除
-
-    $IITOperationStatus_status_trackAdding = $comobj_iTunes.LibraryPlaylist.AddFile($finfo_trackFile) # トラックを追加
-    while ($IITOperationStatus_status_trackAdding.InProgress) { # 追加完了まで待機
-        Start-Sleep -Milliseconds 10
-    }
-    # Write-Host $IITOperationStatus_status_trackAdding.Tracks.Item(1).Name
-    $IITTrack_track_added = $IITOperationStatus_status_trackAdding.Tracks.Item(1) # 追加したトラックの `IITTrack` オブジェクトを取得
-    $hasharr_splatter[$int_idxOfRow].Track = $IITTrack_track_added # `Set-IITTrackProperty` をコールする際にのスプラッターに追加
+    $hasharr_splatter[$int_idxOfRow].Remove("FilePath")
+    $hasharr_splatter[$int_idxOfRow].Track = $finfo_trackFile
 
     $hash_splatter = $hasharr_splatter[$int_idxOfRow]
+    try{
+        Set-IITTrackProperty @hash_splatter -ValidateOnly | Out-Null #
+    }catch{
+        throw [System.Exception]::new(
+            "Following error occured while reading `"" + $PropertySpecifierFile.FullName + "`", Row: " + ($int_idxOfRow + 2).ToString() + "`n" + `
+            $_.Exception.Message
+        )
+        exit 1
+    }
     Set-IITTrackProperty @hash_splatter | Out-Null # トラックのプロパティを設定
-
 }
 
 Write-Host "Done!"
