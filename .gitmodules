@@ -1,0 +1,3 @@
+[submodule "Yakenohara.COM.iTunes.Track"]
+	path = Yakenohara.COM.iTunes.Track
+	url = https://github.com/yakenohara/PowerShell-iTunesTrackUtility.git
